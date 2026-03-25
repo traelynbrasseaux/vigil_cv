@@ -8,6 +8,8 @@
 ![TensorRT](https://img.shields.io/badge/TensorRT-10.x-76b900.svg)
 ![Windows](https://img.shields.io/badge/Windows-11-0078d4.svg)
 
+![vigil](assets/vigil-cv-map.png)
+
 A production-quality ML pipeline for PatchCore anomaly detection on the MVTec AD dataset, with ONNX and TensorRT export, multi-backend benchmarking, and a real-time Gradio demo.
 
 ---
