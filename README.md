@@ -84,7 +84,7 @@ A production-quality ML pipeline for PatchCore anomaly detection on the MVTec AD
 ### 1. Clone and set up environment
 
 ```powershell
-git clone https://github.com/yourusername/vigil_cv.git
+git clone https://github.com/traelynbrasseaux/vigil_cv.git
 cd vigil_cv
 ```
 
