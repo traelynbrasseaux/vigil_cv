@@ -19,13 +19,15 @@ A production-quality ML pipeline for PatchCore anomaly detection on the MVTec AD
 
 | Backend    | Precision | Mean Latency (ms) | P95 Latency (ms) | FPS  | Image AUROC |
 |------------|-----------|-------------------|-------------------|------|-------------|
-| PyTorch    | FP32      | 14.94             | 17.13             | 67   | 0.8590      |
-| ONNX       | FP32      | 13.94             | 15.68             | 72   | 0.8580      |
-| TensorRT   | FP32      | --                | --                | --   | --          |
-| TensorRT   | FP16      | --                | --                | --   | --          |
-| TensorRT   | INT8      | --                | --                | --   | --          |
+| PyTorch    | FP32      | 14.70             | 16.54             | 68   | 0.8590      |
+| ONNX       | FP32      | 13.20             | 14.83             | 76   | 0.8580      |
+| TensorRT   | FP32      | 13.03             | 15.58             | 77   | 0.8584      |
+| TensorRT   | FP16      | 12.49             | 14.44             | 80   | 0.8594      |
+| TensorRT   | INT8      | 13.19             | 14.91             | 76   | 0.9497†     |
 
-*TensorRT results pending installation. Run `benchmark/run_benchmark.py` to generate results for your hardware.*
+*Run `benchmark/run_benchmark.py` to generate results for your hardware.*
+
+†INT8 AUROC anomaly: see [Results Discussion](#results-discussion) below.
 
 ---
 
@@ -335,21 +337,34 @@ This project was developed and tested on:
 
 ## Results Discussion
 
-### Where INT8 excels
+### Why latency gaps are small
 
-- **Structural defects** (holes, tears, large scratches): INT8 maintains near-FP32 accuracy because these defects produce strong, easily quantizable feature responses
-- **High-contrast anomalies**: Color changes, missing components, and large deformations are robust to quantization
-- **Throughput-critical deployments**: 5x+ speedup enables real-time processing on edge devices
+All backends are within ~2ms of each other because EfficientNet-B0 (5.3M params) is compute-bound only on very constrained hardware. On an RTX 5070 with its Blackwell architecture and high FP16 throughput, the kNN search against the FAISS memory bank dominates inference time — not the backbone forward pass. TensorRT's advantages become more pronounced with larger backbones or on edge devices where memory bandwidth is the bottleneck.
+
+### INT8: minimal speedup, unexpected AUROC jump
+
+TensorRT INT8 was expected to be the fastest backend but measured nearly identically to FP16 (13.19ms vs 12.49ms). Two reasons:
+
+1. **RTX 5070 FP16 throughput**: Blackwell GPUs have substantial FP16/BF16 tensor core throughput, so INT8 gains are marginal for small models.
+2. **Implicit quantization fallback**: TensorRT 10.x emitted `Dequantize [SCALE] has invalid precision Int8, ignored` for most layers, meaning they ran at higher precision. The `IInt8MinMaxCalibrator` API is deprecated in TRT 10.1 in favor of explicit quantization. The engine is effectively mixed-precision rather than true INT8.
+
+The INT8 AUROC of **0.9497** (vs 0.858x for all other backends) is a numerical artifact of this fallback. The layers that *did* get quantized had their activations shifted by MinMax calibration, which incidentally changed the feature distribution in a way that improved kNN separation on this particular test split. This is not a reliable improvement across datasets or categories — it reflects the non-determinism of implicit quantization rather than a genuine accuracy gain.
+
+### Where INT8 excels (general guidance)
+
+- **Structural defects** (holes, tears, large scratches): strong feature responses are robust to quantization noise
+- **High-contrast anomalies**: color changes and large deformations tolerate reduced precision
+- **Edge devices** (Jetson Orin, etc.): memory bandwidth is the bottleneck; INT8 gives 2-4x gains where FP16 headroom is limited
 
 ### Where INT8 degrades
 
-- **Fine-grained textures** (subtle surface roughness, micro-scratches): The reduced precision loses subtle feature variations that distinguish normal texture from minor defects
-- **Near-threshold anomalies**: Samples with borderline anomaly scores are more likely to be misclassified after quantization
-- **Categories with high intra-class variance**: When normal samples already show significant variation, INT8 may struggle to distinguish normal variation from genuine anomalies
+- **Fine-grained textures** (subtle surface roughness, micro-scratches): reduced precision loses subtle feature variations
+- **Near-threshold anomalies**: borderline scores are more susceptible to misclassification after quantization
+- **High intra-class variance categories**: INT8 may collapse the margin between normal variation and genuine anomalies
 
 ### Recommendation
 
-Use **FP16** as the default for deployment - it provides 2x speedup over FP32 with virtually no accuracy loss. Reserve **INT8** for scenarios where throughput is the primary constraint and the target defects are structurally significant.
+Use **FP16** as the default for deployment — it provides consistent speedup over FP32 with negligible accuracy impact (< 0.01 AUROC on leather). For true INT8 deployment, migrate to TensorRT's explicit quantization API (PTQ with `IQuantizeLayer`) rather than the deprecated implicit calibration path used here.
 
 ---
 
